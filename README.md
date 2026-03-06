@@ -1,4 +1,4 @@
-# 长青斗地主
+# 老爸斗地主
 
 适配老人使用的 Android 15 平板斗地主应用，面向 14 寸横屏大屏设计。项目使用 Kotlin + Jetpack Compose，从零实现三人本地单机斗地主、AI 出牌、实时进度保存和 GitHub Actions 自动发布 APK。
 
@@ -92,4 +92,3 @@ git push origin main --tags
 - 托管模式、难度档位
 - 更细的战绩系统与老人偏好设置
 - 平板双栏设置页和无障碍增强模式
-

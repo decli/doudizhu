@@ -119,7 +119,7 @@ private fun HeaderBar(state: GameUiState, session: GameSession) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("长青斗地主", style = MaterialTheme.typography.headlineMedium, color = Color(0xFFFFF6E8))
+                Text("老爸斗地主", style = MaterialTheme.typography.headlineMedium, color = Color(0xFFFFF6E8))
                 Text(
                     "Android 15 平板适老版",
                     style = MaterialTheme.typography.bodyMedium,
