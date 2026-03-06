@@ -52,14 +52,15 @@ jobs:
 
       - name: Sign APK
         run: |
-          zipalign -p -f 4 app/build/outputs/apk/release/app-release-unsigned.apk app/build/outputs/apk/release/doudizhu-aligned.apk
-          apksigner sign \
+          BUILD_TOOLS="${ANDROID_HOME}/build-tools/35.0.0"
+          "${BUILD_TOOLS}/zipalign" -p -f 4 app/build/outputs/apk/release/app-release-unsigned.apk app/build/outputs/apk/release/doudizhu-aligned.apk
+          "${BUILD_TOOLS}/apksigner" sign \
             --ks release-keystore.jks \
             --ks-pass pass:android \
             --key-pass pass:android \
             --out app/build/outputs/apk/release/doudizhu-release.apk \
             app/build/outputs/apk/release/doudizhu-aligned.apk
-          apksigner verify app/build/outputs/apk/release/doudizhu-release.apk
+          "${BUILD_TOOLS}/apksigner" verify app/build/outputs/apk/release/doudizhu-release.apk
 
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
