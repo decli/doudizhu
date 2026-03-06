@@ -2,9 +2,7 @@ package com.decli.doudizhu.audio
 
 import android.content.Context
 import android.media.AudioAttributes
-import android.media.AudioManager
 import android.media.MediaPlayer
-import android.media.ToneGenerator
 import android.speech.tts.TextToSpeech
 import com.decli.doudizhu.R
 import com.decli.doudizhu.engine.CardFormatter
@@ -18,17 +16,16 @@ class RobotAnnouncer(
     context: Context,
 ) : TextToSpeech.OnInitListener {
     private val appContext = context.applicationContext
-    private val toneGenerator = ToneGenerator(AudioManager.STREAM_MUSIC, 70)
-    private val textToSpeech = TextToSpeech(appContext, this)
     private val voiceExecutor = Executors.newSingleThreadExecutor()
-    private val pendingAnnouncements = ArrayDeque<AnnouncementCue>()
     @Volatile
-    private var initialized = false
+    private var initializationAttempted = false
     @Volatile
     private var ttsReady = false
+    @Volatile
+    private var textToSpeech: TextToSpeech? = null
 
     override fun onInit(status: Int) {
-        initialized = true
+        val tts = textToSpeech ?: return
         if (status == TextToSpeech.SUCCESS) {
             ttsReady = sequenceOf(
                 Locale.SIMPLIFIED_CHINESE,
@@ -36,7 +33,7 @@ class RobotAnnouncer(
                 Locale.CHINESE,
                 Locale.getDefault(),
             ).firstNotNullOfOrNull { locale ->
-                val result = textToSpeech.setLanguage(locale)
+                val result = tts.setLanguage(locale)
                 if (result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED) {
                     locale
                 } else {
@@ -44,92 +41,92 @@ class RobotAnnouncer(
                 }
             } != null
             if (ttsReady) {
-                textToSpeech.setAudioAttributes(
+                tts.setAudioAttributes(
                     AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_GAME)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build(),
                 )
-                textToSpeech.setSpeechRate(0.92f)
-                textToSpeech.setPitch(0.96f)
+                tts.setSpeechRate(0.92f)
+                tts.setPitch(0.96f)
             }
         }
-        drainPendingAnnouncements()
     }
 
     fun announce(cards: List<Card>) {
         if (cards.isEmpty()) return
-        val cue = buildCue(cards)
-        if (!initialized) {
-            synchronized(pendingAnnouncements) {
-                if (pendingAnnouncements.size >= 4) {
-                    pendingAnnouncements.removeFirst()
-                }
-                pendingAnnouncements.addLast(cue)
-            }
-            return
-        }
-        playCue(cue, TextToSpeech.QUEUE_FLUSH, "robot_play")
+        ensureInitialized()
+        playCue(buildCue(cards), TextToSpeech.QUEUE_FLUSH, "robot_play")
     }
 
     fun release() {
-        textToSpeech.stop()
-        textToSpeech.shutdown()
+        textToSpeech?.stop()
+        textToSpeech?.shutdown()
+        textToSpeech = null
         voiceExecutor.shutdownNow()
-        toneGenerator.release()
-    }
-
-    private fun drainPendingAnnouncements() {
-        while (true) {
-            val cue = synchronized(pendingAnnouncements) {
-                pendingAnnouncements.removeFirstOrNull()
-            } ?: return
-            playCue(cue, TextToSpeech.QUEUE_ADD, "robot_play_queue_${System.nanoTime()}")
-        }
     }
 
     private fun playCue(cue: AnnouncementCue, queueMode: Int, utteranceId: String) {
-        if (ttsReady) {
-            if (speak(cue.message, queueMode, utteranceId) == TextToSpeech.SUCCESS) {
-                return
-            }
+        val speakResult = if (ttsReady) {
+            speak(cue.message, queueMode, utteranceId)
+        } else {
+            TextToSpeech.ERROR
         }
-        playFallback(cue)
+        if (speakResult != TextToSpeech.SUCCESS) {
+            playFallback(cue)
+        }
     }
 
     private fun speak(message: String, queueMode: Int, utteranceId: String): Int {
-        toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP2, 90)
-        return textToSpeech.speak(message, queueMode, null, utteranceId)
+        val tts = textToSpeech ?: return TextToSpeech.ERROR
+        return runCatching {
+            tts.speak(message, queueMode, null, utteranceId)
+        }.getOrElse {
+            ttsReady = false
+            TextToSpeech.ERROR
+        }
     }
 
     private fun playFallback(cue: AnnouncementCue) {
         voiceExecutor.execute {
-            if (cue.clips.isEmpty()) {
-                toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP2, 140)
-                return@execute
-            }
             cue.clips.forEach { clip ->
-                playClip(clip.resId)
+                if (!playClip(clip.resId)) {
+                    return@execute
+                }
                 Thread.sleep(18)
             }
         }
     }
 
-    private fun playClip(resId: Int) {
-        val mediaPlayer = MediaPlayer.create(appContext, resId) ?: return
-        mediaPlayer.setAudioAttributes(
-            AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_GAME)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                .build(),
-        )
-        try {
-            mediaPlayer.start()
-            while (mediaPlayer.isPlaying) {
-                Thread.sleep(30)
+    private fun playClip(resId: Int): Boolean {
+        return runCatching {
+            val mediaPlayer = MediaPlayer.create(appContext, resId) ?: return false
+            mediaPlayer.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_GAME)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build(),
+            )
+            try {
+                mediaPlayer.start()
+                while (mediaPlayer.isPlaying) {
+                    Thread.sleep(30)
+                }
+            } finally {
+                mediaPlayer.release()
             }
-        } finally {
-            mediaPlayer.release()
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun ensureInitialized() {
+        if (initializationAttempted) return
+        synchronized(this) {
+            if (initializationAttempted) return
+            initializationAttempted = true
+            textToSpeech = runCatching {
+                TextToSpeech(appContext, this)
+            }.getOrNull()
         }
     }
 
